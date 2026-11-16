@@ -1,0 +1,11 @@
+[
+  {
+    "modid": "handmotionblur",
+    "name": "Hand Motion Blur",
+    "description": "Motion blur chi ap dung cho tay / vat pham cam (swing, tools, sword...). Accumulation Mix / Max.",
+    "version": "1.0.0",
+    "mcversion": "1.8.9",
+    "authorList": [],
+    "credits": "Y tuong dua tren Natural Motion Blur (ItsPasi)"
+  }
+]
