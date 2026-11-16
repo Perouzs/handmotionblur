@@ -78,7 +78,8 @@ public class HandBlurRenderer {
                 drawTex(hand, 1.0f);
                 valid = true;
             } else if ("MAX".equals(HandMotionBlur.mode)) {
-                float decay = (float) Math.exp(-dt / tau);
+                int n = HandMotionBlur.frames;
+                float decay = n > 0 ? 1.0f - 1.0f / n : (float) Math.exp(-dt / tau);
                 drawTex(prev, decay);
                 GlStateManager.enableBlend();
                 GlStateManager.tryBlendFuncSeparate(GL11.GL_ONE, GL11.GL_ONE, GL11.GL_ONE, GL11.GL_ONE);
@@ -86,7 +87,8 @@ public class HandBlurRenderer {
                 drawTex(hand, 1.0f);
                 GL14.glBlendEquation(GL14.GL_FUNC_ADD);
             } else {
-                float a = 1.0f - (float) Math.exp(-dt / tau);
+                int n = HandMotionBlur.frames;
+                float a = n > 0 ? 1.0f / n : 1.0f - (float) Math.exp(-dt / tau);
                 drawTex(prev, 1.0f - a);
                 GlStateManager.enableBlend();
                 GlStateManager.tryBlendFuncSeparate(GL11.GL_ONE, GL11.GL_ONE, GL11.GL_ONE, GL11.GL_ONE);
@@ -126,7 +128,7 @@ public class HandBlurRenderer {
         lastSlot = slot;
 
         long now = System.currentTimeMillis();
-        if (activity) activeUntil = now + 250L + 6L * HandMotionBlur.blurMs;
+        if (activity) activeUntil = now + 500L + 6L * HandMotionBlur.blurMs;
         return now < activeUntil;
     }
 
