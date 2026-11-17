@@ -1,10 +1,11 @@
-# Hand Motion Blur (Forge 1.8.9)
-Project da cau hinh san de GitHub Actions build ra jar (tab Actions -> Artifacts -> mod-jar).
+# Motion Blur (Hand + World) - Forge 1.8.9
+Build bang GitHub Actions (tab Actions -> Artifacts -> mod-jar).
 
-Lenh trong game (/handblur hoac /hmb):
+Lenh (/handblur hoac /hmb):
 - /handblur status
-- /handblur toggle
-- /handblur ms <5-300>     do dai vet blur (ms), khong phu thuoc FPS
-- /handblur frames <0-32>  tron N frame co dinh; 0 = dung ms
-- /handblur mode <mix|max>
-Phim V: bat/tat. Config: config/handmotionblur.cfg
+- /handblur toggle                      bat/tat toan bo mod (phim V)
+- /handblur hand|world toggle
+- /handblur hand|world ms <5-300>       do dai vet blur (ms), khong phu thuoc FPS
+- /handblur hand|world frames <0-32>    tron N frame co dinh; 0 = dung ms
+- /handblur hand|world mode <mix|max>
+Config: config/handmotionblur.cfg (nhom [hand] va [world]).

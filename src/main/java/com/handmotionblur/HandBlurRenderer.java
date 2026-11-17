@@ -17,24 +17,30 @@ import org.lwjgl.opengl.GL14;
 import java.lang.reflect.Method;
 
 /**
- * Y tuong:
- *  1. RenderHandEvent (khong cancel): bind FBO rieng -> vanilla/OptiFine ve tay vao do.
- *  2. RenderGameOverlayEvent.Pre(ALL): vanilla da bind lai FBO chinh sau renderWorld.
- *     Luc nay ta cap nhat buffer tich luy (ping-pong) roi ve len man hinh.
+ * Luong moi frame:
+ *  1. RenderHandEvent (khong cancel): neu can (hand blur hoac world blur dang bat) thi bind FBO rieng
+ *     de tay duoc ve tach khoi the gioi.
+ *  2. RenderGameOverlayEvent.Pre(ALL): luc nay framebuffer chinh chi chua the gioi.
+ *       a) World pass: tron the gioi vao buffer tich luy roi ghi nguoc lai framebuffer chinh (chi RGB).
+ *       b) Hand pass: tich luy tay (neu dang hoat dong) roi ve de len man hinh.
  */
 public class HandBlurRenderer {
     private final Minecraft mc = Minecraft.getMinecraft();
 
-    private Framebuffer hand;
-    private final Framebuffer[] accum = new Framebuffer[2];
-    private int cur = 0;
-    private boolean valid = false;     // accum[cur] da chua du lieu hop le
-    private boolean usedFbo = false;   // frame nay tay da duoc ve vao FBO
+    private Framebuffer handFbo;
+    private final Framebuffer[] handAccum = new Framebuffer[2];
+    private final Framebuffer[] worldAccum = new Framebuffer[2];
+    private int handCur = 0, worldCur = 0;
+    private boolean handValid = false, worldValid = false;
+
+    private boolean usedFbo = false;     // frame nay tay da duoc ve vao FBO
+    private boolean handBlurFrame = false; // frame nay tay can tich luy
 
     private long activeUntil = 0L;
     private long lastNano = 0L;
     private Item lastItem;
     private int lastSlot = -1;
+    private Object lastWorld;
 
     private boolean ofLookedUp = false;
     private Method ofIsShaders;
@@ -44,73 +50,146 @@ public class HandBlurRenderer {
     @SubscribeEvent
     public void onRenderHand(RenderHandEvent e) {
         usedFbo = false;
-        if (!shouldRun()) {
-            valid = false;
-            return;
-        }
+        handBlurFrame = false;
+
+        boolean worldOn = worldActive();
+        if (mc.gameSettings.hideGUI) worldValid = false; // overlay co the khong chay khi an GUI
+        boolean handOn = handActive();
+        if (!handOn) handValid = false;
+        if (!handOn && !worldOn) return;
         if (!ensureBuffers()) return;
-        hand.framebufferClear();       // (0,0,0,0)
-        hand.bindFramebuffer(true);    // vanilla se clear depth roi ve tay vao day
+
+        handFbo.framebufferClear();       // (0,0,0,0)
+        handFbo.bindFramebuffer(true);    // vanilla se clear depth roi ve tay vao day
         usedFbo = true;
+        handBlurFrame = handOn;
     }
 
     @SubscribeEvent(priority = EventPriority.HIGHEST, receiveCanceled = true)
     public void onOverlay(RenderGameOverlayEvent.Pre e) {
-        if (e.type != RenderGameOverlayEvent.ElementType.ALL || !usedFbo) return;
+        if (e.type != RenderGameOverlayEvent.ElementType.ALL) return;
+        boolean worldOn = worldActive();
+        if (!usedFbo && !worldOn) return;
+        boolean hadHand = usedFbo;
         usedFbo = false;
 
+        if (!ensureBuffers()) return;
+
         long now = System.nanoTime();
-        float dt = lastNano == 0L ? 0.016f : (now - lastNano) / 1.0e9f;
+        float raw = lastNano == 0L ? 0.016f : (now - lastNano) / 1.0e9f;
         lastNano = now;
-        dt = Math.max(0.001f, Math.min(0.1f, dt));
-        float tau = Math.max(0.005f, HandMotionBlur.blurMs / 1000.0f);
+        if (raw > 0.25f) worldValid = false; // gap lon (pause, load...) -> khoi tao lai
+        float dt = Math.max(0.001f, Math.min(0.1f, raw));
 
         setupState();
         try {
-            Framebuffer prev = accum[cur];
-            Framebuffer next = accum[1 - cur];
-
-            next.bindFramebuffer(true);
-            GlStateManager.disableBlend();
-
-            if (!valid) {
-                // frame dau tien: accum = tay hien tai (khong blur, tranh "hien dan")
-                drawTex(hand, 1.0f);
-                valid = true;
-            } else if ("MAX".equals(HandMotionBlur.mode)) {
-                int n = HandMotionBlur.frames;
-                float decay = n > 0 ? 1.0f - 1.0f / n : (float) Math.exp(-dt / tau);
-                drawTex(prev, decay);
-                GlStateManager.enableBlend();
-                GlStateManager.tryBlendFuncSeparate(GL11.GL_ONE, GL11.GL_ONE, GL11.GL_ONE, GL11.GL_ONE);
-                GL14.glBlendEquation(GL14.GL_MAX);
-                drawTex(hand, 1.0f);
-                GL14.glBlendEquation(GL14.GL_FUNC_ADD);
-            } else {
-                int n = HandMotionBlur.frames;
-                float a = n > 0 ? 1.0f / n : 1.0f - (float) Math.exp(-dt / tau);
-                drawTex(prev, 1.0f - a);
-                GlStateManager.enableBlend();
-                GlStateManager.tryBlendFuncSeparate(GL11.GL_ONE, GL11.GL_ONE, GL11.GL_ONE, GL11.GL_ONE);
-                drawTex(hand, a);
-            }
-            cur = 1 - cur;
-
-            // ghep len man hinh chinh (premultiplied alpha)
-            mc.getFramebuffer().bindFramebuffer(true);
-            GlStateManager.enableBlend();
-            GlStateManager.tryBlendFuncSeparate(GL11.GL_ONE, GL11.GL_ONE_MINUS_SRC_ALPHA,
-                    GL11.GL_ONE, GL11.GL_ONE_MINUS_SRC_ALPHA);
-            drawTex(accum[cur], 1.0f);
+            if (worldOn) worldPass(dt);
+            if (hadHand) handPass(dt);
         } finally {
             restoreState();
         }
     }
 
+    // ------------------------------------------------------------------ passes
+
+    private void worldPass(float dt) {
+        BlurSettings s = HandMotionBlur.world;
+        Framebuffer main = mc.getFramebuffer();
+        Framebuffer prev = worldAccum[worldCur];
+        Framebuffer next = worldAccum[1 - worldCur];
+
+        next.bindFramebuffer(true);
+        GlStateManager.colorMask(true, true, true, false); // chi RGB: alpha cua the gioi khong dang tin
+        GlStateManager.disableBlend();
+
+        if (!worldValid) {
+            drawTex(main, 1.0f);
+            worldValid = true;
+        } else if (s.isMax()) {
+            drawTex(prev, s.decay(dt));
+            GlStateManager.enableBlend();
+            GlStateManager.tryBlendFuncSeparate(GL11.GL_ONE, GL11.GL_ONE, GL11.GL_ONE, GL11.GL_ONE);
+            GL14.glBlendEquation(GL14.GL_MAX);
+            drawTex(main, 1.0f);
+            GL14.glBlendEquation(GL14.GL_FUNC_ADD);
+        } else {
+            float a = s.mix(dt);
+            drawTex(prev, 1.0f - a);
+            GlStateManager.enableBlend();
+            GlStateManager.tryBlendFuncSeparate(GL11.GL_ONE, GL11.GL_ONE, GL11.GL_ONE, GL11.GL_ONE);
+            drawTex(main, a);
+        }
+        worldCur = 1 - worldCur;
+
+        // ghi ket qua nguoc lai man hinh chinh
+        main.bindFramebuffer(true);
+        GlStateManager.disableBlend();
+        drawTex(worldAccum[worldCur], 1.0f);
+        GlStateManager.colorMask(true, true, true, true);
+    }
+
+    private void handPass(float dt) {
+        BlurSettings s = HandMotionBlur.hand;
+        Framebuffer source;
+
+        if (handBlurFrame) {
+            Framebuffer prev = handAccum[handCur];
+            Framebuffer next = handAccum[1 - handCur];
+            next.bindFramebuffer(true);
+            GlStateManager.disableBlend();
+
+            if (!handValid) {
+                drawTex(handFbo, 1.0f); // frame dau: khong blur, tranh "hien dan"
+                handValid = true;
+            } else if (s.isMax()) {
+                drawTex(prev, s.decay(dt));
+                GlStateManager.enableBlend();
+                GlStateManager.tryBlendFuncSeparate(GL11.GL_ONE, GL11.GL_ONE, GL11.GL_ONE, GL11.GL_ONE);
+                GL14.glBlendEquation(GL14.GL_MAX);
+                drawTex(handFbo, 1.0f);
+                GL14.glBlendEquation(GL14.GL_FUNC_ADD);
+            } else {
+                float a = s.mix(dt);
+                drawTex(prev, 1.0f - a);
+                GlStateManager.enableBlend();
+                GlStateManager.tryBlendFuncSeparate(GL11.GL_ONE, GL11.GL_ONE, GL11.GL_ONE, GL11.GL_ONE);
+                drawTex(handFbo, a);
+            }
+            handCur = 1 - handCur;
+            source = handAccum[handCur];
+        } else {
+            handValid = false;
+            source = handFbo; // tay dung yen: ve thang, khong tich luy
+        }
+
+        mc.getFramebuffer().bindFramebuffer(true);
+        GlStateManager.enableBlend();
+        GlStateManager.tryBlendFuncSeparate(GL11.GL_ONE, GL11.GL_ONE_MINUS_SRC_ALPHA,
+                GL11.GL_ONE, GL11.GL_ONE_MINUS_SRC_ALPHA);
+        drawTex(source, 1.0f);
+    }
+
     // ------------------------------------------------------------------ logic
 
-    private boolean shouldRun() {
-        if (!HandMotionBlur.enabled) return false;
+    private boolean worldActive() {
+        boolean on = HandMotionBlur.master && HandMotionBlur.world.enabled
+                && OpenGlHelper.isFramebufferEnabled()
+                && mc.theWorld != null
+                && !mc.gameSettings.anaglyph
+                && !shadersActive();
+        if (!on) {
+            worldValid = false;
+            return false;
+        }
+        if (mc.theWorld != lastWorld) { // doi the gioi / dimension
+            lastWorld = mc.theWorld;
+            worldValid = false;
+        }
+        return true;
+    }
+
+    private boolean handActive() {
+        if (!HandMotionBlur.master || !HandMotionBlur.hand.enabled) return false;
         if (!OpenGlHelper.isFramebufferEnabled()) return false;
         EntityPlayerSP p = mc.thePlayer;
         if (p == null) return false;
@@ -128,11 +207,11 @@ public class HandBlurRenderer {
         lastSlot = slot;
 
         long now = System.currentTimeMillis();
-        if (activity) activeUntil = now + 500L + 6L * HandMotionBlur.blurMs;
+        if (activity) activeUntil = now + 500L + 6L * HandMotionBlur.hand.blurMs;
         return now < activeUntil;
     }
 
-    /** OptiFine shader pack tu quan ly hand FBO -> tat mod de tranh loi. */
+    /** OptiFine shader pack tu quan ly framebuffer -> tat mod de tranh loi. */
     private boolean shadersActive() {
         if (!ofLookedUp) {
             ofLookedUp = true;
@@ -154,19 +233,25 @@ public class HandBlurRenderer {
         int w = mc.getFramebuffer().framebufferWidth;
         int h = mc.getFramebuffer().framebufferHeight;
         if (w <= 0 || h <= 0) return false;
-        if (hand == null) {
-            hand = new Framebuffer(w, h, true);
-            hand.setFramebufferColor(0.0f, 0.0f, 0.0f, 0.0f);
-            accum[0] = new Framebuffer(w, h, false);
-            accum[1] = new Framebuffer(w, h, false);
-            accum[0].setFramebufferColor(0.0f, 0.0f, 0.0f, 0.0f);
-            accum[1].setFramebufferColor(0.0f, 0.0f, 0.0f, 0.0f);
-            valid = false;
-        } else if (hand.framebufferWidth != w || hand.framebufferHeight != h) {
-            hand.createBindFramebuffer(w, h);
-            accum[0].createBindFramebuffer(w, h);
-            accum[1].createBindFramebuffer(w, h);
-            valid = false;
+        if (handFbo == null) {
+            handFbo = new Framebuffer(w, h, true);
+            handFbo.setFramebufferColor(0.0f, 0.0f, 0.0f, 0.0f);
+            for (int i = 0; i < 2; i++) {
+                handAccum[i] = new Framebuffer(w, h, false);
+                worldAccum[i] = new Framebuffer(w, h, false);
+                handAccum[i].setFramebufferColor(0.0f, 0.0f, 0.0f, 0.0f);
+                worldAccum[i].setFramebufferColor(0.0f, 0.0f, 0.0f, 0.0f);
+            }
+            handValid = false;
+            worldValid = false;
+        } else if (handFbo.framebufferWidth != w || handFbo.framebufferHeight != h) {
+            handFbo.createBindFramebuffer(w, h);
+            for (int i = 0; i < 2; i++) {
+                handAccum[i].createBindFramebuffer(w, h);
+                worldAccum[i].createBindFramebuffer(w, h);
+            }
+            handValid = false;
+            worldValid = false;
         }
         return true;
     }
@@ -194,6 +279,8 @@ public class HandBlurRenderer {
 
     private void restoreState() {
         GL14.glBlendEquation(GL14.GL_FUNC_ADD);
+        mc.getFramebuffer().bindFramebuffer(true);
+        GlStateManager.colorMask(true, true, true, true);
         GlStateManager.matrixMode(5889);
         GlStateManager.popMatrix();
         GlStateManager.matrixMode(5888);
