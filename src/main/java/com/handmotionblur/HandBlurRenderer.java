@@ -27,6 +27,9 @@ import java.lang.reflect.Method;
  *       b) Hand pass: tich luy tay (neu dang hoat dong) roi ve de len man hinh.
  */
 public class HandBlurRenderer {
+    private static final int GL_CONSTANT_ALPHA = 0x8003;
+    private static final int GL_ONE_MINUS_CONSTANT_ALPHA = 0x8004;
+
     private final Minecraft mc = Minecraft.getMinecraft();
 
     private Framebuffer handFbo;
@@ -208,7 +211,7 @@ public class HandBlurRenderer {
             } else {
                 GlStateManager.enableBlend();
                 GL14.glBlendColor(0.0f, 0.0f, 0.0f, 1.0f / (i + 1));
-                GlStateManager.tryBlendFuncSeparate(GL14.GL_CONSTANT_ALPHA, GL14.GL_ONE_MINUS_CONSTANT_ALPHA,
+                GlStateManager.tryBlendFuncSeparate(GL_CONSTANT_ALPHA, GL_ONE_MINUS_CONSTANT_ALPHA,
                         GL11.GL_ONE, GL11.GL_ZERO);
             }
             drawTexShift(main, t * vx, t * vy);
