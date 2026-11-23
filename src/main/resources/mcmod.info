@@ -3,7 +3,7 @@
     "modid": "handmotionblur",
     "name": "Motion Blur (Hand + World)",
     "description": "Motion blur dang accumulation cho tay/vat pham cam va rieng cho toan bo the gioi, moi nhom co setting rieng.",
-    "version": "1.2.0",
+    "version": "1.3.1",
     "mcversion": "1.8.9",
     "authorList": [],
     "credits": "Y tuong dua tren Natural Motion Blur (ItsPasi)"

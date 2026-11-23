@@ -23,7 +23,7 @@ public class HandBlurCommand extends CommandBase {
 
     @Override
     public String getCommandUsage(ICommandSender sender) {
-        return "/handblur status | toggle | <hand|world> <toggle|ms|frames|mode|shutter|samples> [gia tri]";
+        return "/handblur status | toggle | <hand|world> <toggle|ms|frames|mode|shutter|samples|clear|thirdperson> [gia tri]";
     }
 
     @Override
@@ -72,7 +72,7 @@ public class HandBlurCommand extends CommandBase {
             s.setEnabled(!s.enabled);
             msg(sender, s.name + ": " + (s.enabled ? "ON" : "OFF"));
         } else if (sub.equals("ms")) {
-            Integer v = parseInt(sender, val, 5, 300);
+            Integer v = parseInt(sender, val, 1, 300);
             if (v == null) return;
             s.setBlurMs(v);
             msg(sender, s.name + ".blurMs = " + s.blurMs
@@ -106,6 +106,27 @@ public class HandBlurCommand extends CommandBase {
             if (shut) s.setShutterMs(v); else s.setSamples(v);
             msg(sender, s.name + "." + (shut ? "shutterMs = " + s.shutterMs : "samples = " + s.samples)
                     + (s.isRotation() ? "" : "  (chi co tac dung khi mode = rotation)"));
+        } else if (sub.equals("clear")) {
+            if (!s.hasRotation) {
+                msg(sender, "Lenh nay chi dung cho 'world' (che do ROTATION).");
+                return;
+            }
+            Integer v = parseInt(sender, val, 0, 100);
+            if (v == null) return;
+            s.setCenterClear(v);
+            msg(sender, s.name + ".centerClear = " + s.centerClear + (v == 0 ? "  (blur ca man hinh)" : "  (vung giua giu net)")
+                    + (s.isRotation() ? "" : "  (chi co tac dung khi mode = rotation)"));
+        } else if (sub.equals("thirdperson")) {
+            if (!s.hasRotation) {
+                msg(sender, "Lenh nay chi dung cho 'world' (che do ROTATION).");
+                return;
+            }
+            if (val == null || !(val.equalsIgnoreCase("on") || val.equalsIgnoreCase("off"))) {
+                msg(sender, "Dung: /handblur world thirdperson <on|off>");
+                return;
+            }
+            s.setThirdPerson(val.equalsIgnoreCase("on"));
+            msg(sender, s.name + ".thirdPerson = " + (s.thirdPerson ? "ON" : "OFF"));
         } else {
             msg(sender, getCommandUsage(sender));
         }
@@ -132,7 +153,8 @@ public class HandBlurCommand extends CommandBase {
     }
 
     private void line(ICommandSender sender, BlurSettings s) {
-        String extra = s.hasRotation ? " | shutterMs=" + s.shutterMs + " | samples=" + s.samples : "";
+        String extra = s.hasRotation ? " | shutterMs=" + s.shutterMs + " | samples=" + s.samples
+                + " | centerClear=" + s.centerClear + " | thirdPerson=" + (s.thirdPerson ? "ON" : "OFF") : "";
         msg(sender, s.name + ": " + (s.enabled ? "ON" : "OFF") + " | mode=" + s.mode
                 + " | blurMs=" + s.blurMs + " | frames=" + s.frames + extra);
     }
@@ -147,7 +169,10 @@ public class HandBlurCommand extends CommandBase {
             return getListOfStringsMatchingLastWord(args, "status", "toggle", "hand", "world");
         }
         if (args.length == 2 && (args[0].equalsIgnoreCase("hand") || args[0].equalsIgnoreCase("world"))) {
-            return getListOfStringsMatchingLastWord(args, "toggle", "ms", "frames", "mode", "shutter", "samples");
+            return getListOfStringsMatchingLastWord(args, "toggle", "ms", "frames", "mode", "shutter", "samples", "clear", "thirdperson");
+        }
+        if (args.length == 3 && args[1].equalsIgnoreCase("thirdperson")) {
+            return getListOfStringsMatchingLastWord(args, "on", "off");
         }
         if (args.length == 3 && args[1].equalsIgnoreCase("mode")) {
             return args[0].equalsIgnoreCase("world")

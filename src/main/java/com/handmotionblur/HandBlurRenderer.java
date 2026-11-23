@@ -155,6 +155,10 @@ public class HandBlurRenderer {
         Entity ve = mc.getRenderViewEntity();
         if (ve == null) ve = mc.thePlayer;
         if (ve == null) return;
+        if (mc.gameSettings.thirdPersonView != 0 && !s.thirdPerson) {
+            haveAngles = false;
+            return;
+        }
 
         float yaw = ve.prevRotationYaw + (ve.rotationYaw - ve.prevRotationYaw) * pt;
         float pitch = ve.prevRotationPitch + (ve.rotationPitch - ve.prevRotationPitch) * pt;
@@ -218,10 +222,19 @@ public class HandBlurRenderer {
         }
         GL14.glBlendColor(0.0f, 0.0f, 0.0f, 0.0f);
 
-        // ghi ket qua nguoc lai man hinh chinh
-        main.bindFramebuffer(true);
+        // dat alpha cua anh blur = 1 (chi ghi kenh alpha) de dung lam he so tron khi ghep
         GlStateManager.disableBlend();
-        drawTex(tmp, 1.0f);
+        GlStateManager.colorMask(false, false, false, true);
+        GlStateManager.clearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        GlStateManager.clear(16384);
+        GlStateManager.colorMask(true, true, true, false);
+
+        // ghep anh blur len man hinh chinh, vung giua giu anh net goc (mask hinh tron)
+        main.bindFramebuffer(true);
+        GlStateManager.enableBlend();
+        GlStateManager.tryBlendFuncSeparate(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA, GL11.GL_ONE, GL11.GL_ZERO);
+        drawMaskedComposite(tmp, s.centerClear, w, h);
+        GlStateManager.disableBlend();
         GlStateManager.colorMask(true, true, true, true);
     }
 
@@ -390,6 +403,53 @@ public class HandBlurRenderer {
         GlStateManager.enableCull();
         GlStateManager.depthMask(true);
         GlStateManager.enableDepth();
+    }
+
+    /**
+     * Ve texture len man hinh bang luoi 32x32, alpha moi dinh = mask:
+     * 0 o vung giua (giu nguyen anh net ben duoi), tang dan (smoothstep) ra ngoai toi 1.
+     * centerClear <= 0 -> mask = 1 toan man hinh.
+     */
+    private void drawMaskedComposite(Framebuffer src, int centerClear, int w, int h) {
+        src.bindFramebufferTexture();
+        final int n = 32;
+        final float feather = 0.6f;
+        final float r0 = centerClear / 100.0f;
+        final float aspect = (float) w / (float) h;
+        float[] mask = new float[(n + 1) * (n + 1)];
+        for (int j = 0; j <= n; j++) {
+            for (int i = 0; i <= n; i++) {
+                float m = 1.0f;
+                if (centerClear > 0) {
+                    float dx = ((float) i / n - 0.5f) * aspect;
+                    float dy = (float) j / n - 0.5f;
+                    float r = (float) Math.sqrt(dx * dx + dy * dy) / 0.5f; // don vi: nua chieu cao
+                    float t = Math.max(0.0f, Math.min(1.0f, (r - r0) / feather));
+                    m = t * t * (3.0f - 2.0f * t);
+                }
+                mask[j * (n + 1) + i] = m;
+            }
+        }
+        GL11.glBegin(GL11.GL_QUADS);
+        for (int j = 0; j < n; j++) {
+            for (int i = 0; i < n; i++) {
+                emit(i, j, n, mask[j * (n + 1) + i]);
+                emit(i + 1, j, n, mask[j * (n + 1) + i + 1]);
+                emit(i + 1, j + 1, n, mask[(j + 1) * (n + 1) + i + 1]);
+                emit(i, j + 1, n, mask[(j + 1) * (n + 1) + i]);
+            }
+        }
+        GL11.glEnd();
+        GL11.glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+        GlStateManager.color(1.0f, 1.0f, 1.0f, 1.0f);
+    }
+
+    private void emit(int i, int j, int n, float alpha) {
+        float u = (float) i / n;
+        float v = (float) j / n;
+        GL11.glColor4f(1.0f, 1.0f, 1.0f, alpha);
+        GL11.glTexCoord2f(u, v);
+        GL11.glVertex2f(u * 2.0f - 1.0f, v * 2.0f - 1.0f);
     }
 
     /** Ve fullscreen quad voi texture cua FBO, toa do texture bi dich (ox, oy). */
