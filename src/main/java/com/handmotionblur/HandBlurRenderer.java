@@ -2,6 +2,8 @@ package com.handmotionblur;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.entity.EntityPlayerSP;
+import net.minecraft.entity.Entity;
+import net.minecraft.util.MathHelper;
 import net.minecraft.client.renderer.GlStateManager;
 import net.minecraft.client.renderer.OpenGlHelper;
 import net.minecraft.client.shader.Framebuffer;
@@ -42,6 +44,11 @@ public class HandBlurRenderer {
     private int lastSlot = -1;
     private Object lastWorld;
 
+    // trang thai cho che do ROTATION
+    private boolean haveAngles = false;
+    private float lastYaw, lastPitch;
+    private float smYaw, smPitch; // van toc goc da lam muot (do/giay)
+
     private boolean ofLookedUp = false;
     private Method ofIsShaders;
 
@@ -78,12 +85,15 @@ public class HandBlurRenderer {
         long now = System.nanoTime();
         float raw = lastNano == 0L ? 0.016f : (now - lastNano) / 1.0e9f;
         lastNano = now;
-        if (raw > 0.25f) worldValid = false; // gap lon (pause, load...) -> khoi tao lai
+        if (raw > 0.25f) { // gap lon (pause, load...) -> khoi tao lai
+            worldValid = false;
+            haveAngles = false;
+        }
         float dt = Math.max(0.001f, Math.min(0.1f, raw));
 
         setupState();
         try {
-            if (worldOn) worldPass(dt);
+            if (worldOn) worldPass(dt, e.partialTicks);
             if (hadHand) handPass(dt);
         } finally {
             restoreState();
@@ -92,8 +102,13 @@ public class HandBlurRenderer {
 
     // ------------------------------------------------------------------ passes
 
-    private void worldPass(float dt) {
+    private void worldPass(float dt, float partialTicks) {
         BlurSettings s = HandMotionBlur.world;
+        if (s.isRotation()) {
+            rotationPass(s, dt, partialTicks);
+            return;
+        }
+        haveAngles = false;
         Framebuffer main = mc.getFramebuffer();
         Framebuffer prev = worldAccum[worldCur];
         Framebuffer next = worldAccum[1 - worldCur];
@@ -125,6 +140,85 @@ public class HandBlurRenderer {
         main.bindFramebuffer(true);
         GlStateManager.disableBlend();
         drawTex(worldAccum[worldCur], 1.0f);
+        GlStateManager.colorMask(true, true, true, true);
+    }
+
+    /**
+     * Blur theo huong xoay camera: do do xoay yaw/pitch, doi ra vector dich tren man hinh,
+     * lay N mau (can giua) cua the gioi doc vector do va tron bang running-average.
+     * Dung yen / xoay rat cham thi khong lam gi ca.
+     */
+    private void rotationPass(BlurSettings s, float dt, float pt) {
+        Entity ve = mc.getRenderViewEntity();
+        if (ve == null) ve = mc.thePlayer;
+        if (ve == null) return;
+
+        float yaw = ve.prevRotationYaw + (ve.rotationYaw - ve.prevRotationYaw) * pt;
+        float pitch = ve.prevRotationPitch + (ve.rotationPitch - ve.prevRotationPitch) * pt;
+        boolean had = haveAngles;
+        float dyaw = MathHelper.wrapAngleTo180_float(yaw - lastYaw);
+        float dpitch = pitch - lastPitch;
+        lastYaw = yaw;
+        lastPitch = pitch;
+        haveAngles = true;
+        if (!had) {
+            smYaw = 0.0f;
+            smPitch = 0.0f;
+            return;
+        }
+
+        // van toc goc (do/giay), lam muot nhe de tranh nhap nhay khi FPS rat cao
+        float a = 1.0f - (float) Math.exp(-dt / 0.010f);
+        smYaw += (dyaw / dt - smYaw) * a;
+        smPitch += (dpitch / dt - smPitch) * a;
+
+        float shutter = s.shutterMs / 1000.0f;
+        float ay = Math.max(-30.0f, Math.min(30.0f, smYaw * shutter));   // do xoay trong thoi gian man trap
+        float ap = Math.max(-30.0f, Math.min(30.0f, smPitch * shutter));
+
+        Framebuffer main = mc.getFramebuffer();
+        int w = main.framebufferWidth;
+        int h = main.framebufferHeight;
+        double fovY = Math.toRadians(Math.max(30.0f, Math.min(110.0f, mc.gameSettings.fovSetting)));
+        double fpx = (h * 0.5) / Math.tan(fovY * 0.5);
+
+        // noi dung o pixel hien tai truoc do nam o (x + sx, y - sy) khi yaw/pitch tang
+        float vx = (float) (fpx * Math.tan(Math.toRadians(ay)) / w);
+        float vy = (float) (-fpx * Math.tan(Math.toRadians(ap)) / h);
+
+        float len = (float) Math.sqrt(vx * vx + vy * vy);
+        final float maxLen = 0.12f; // toi da 12% man hinh
+        if (len > maxLen) {
+            float sc = maxLen / len;
+            vx *= sc;
+            vy *= sc;
+        }
+        float lenPx = (float) Math.sqrt((vx * w) * (vx * w) + (vy * h) * (vy * h));
+        if (lenPx < 1.5f) return; // duoi nguong: bo qua hoan toan
+
+        int n = Math.max(2, Math.min(s.samples, (int) Math.ceil(lenPx / 3.0f)));
+
+        Framebuffer tmp = worldAccum[0];
+        tmp.bindFramebuffer(true);
+        GlStateManager.colorMask(true, true, true, false);
+        for (int i = 0; i < n; i++) {
+            float t = (i + 0.5f) / n - 0.5f; // can giua
+            if (i == 0) {
+                GlStateManager.disableBlend();
+            } else {
+                GlStateManager.enableBlend();
+                GL14.glBlendColor(0.0f, 0.0f, 0.0f, 1.0f / (i + 1));
+                GlStateManager.tryBlendFuncSeparate(GL14.GL_CONSTANT_ALPHA, GL14.GL_ONE_MINUS_CONSTANT_ALPHA,
+                        GL11.GL_ONE, GL11.GL_ZERO);
+            }
+            drawTexShift(main, t * vx, t * vy);
+        }
+        GL14.glBlendColor(0.0f, 0.0f, 0.0f, 0.0f);
+
+        // ghi ket qua nguoc lai man hinh chinh
+        main.bindFramebuffer(true);
+        GlStateManager.disableBlend();
+        drawTex(tmp, 1.0f);
         GlStateManager.colorMask(true, true, true, true);
     }
 
@@ -184,6 +278,7 @@ public class HandBlurRenderer {
         if (mc.theWorld != lastWorld) { // doi the gioi / dimension
             lastWorld = mc.theWorld;
             worldValid = false;
+            haveAngles = false;
         }
         return true;
     }
@@ -292,6 +387,18 @@ public class HandBlurRenderer {
         GlStateManager.enableCull();
         GlStateManager.depthMask(true);
         GlStateManager.enableDepth();
+    }
+
+    /** Ve fullscreen quad voi texture cua FBO, toa do texture bi dich (ox, oy). */
+    private void drawTexShift(Framebuffer src, float ox, float oy) {
+        src.bindFramebufferTexture();
+        GlStateManager.color(1.0f, 1.0f, 1.0f, 1.0f);
+        GL11.glBegin(GL11.GL_QUADS);
+        GL11.glTexCoord2f(ox, oy); GL11.glVertex2f(-1.0f, -1.0f);
+        GL11.glTexCoord2f(1.0f + ox, oy); GL11.glVertex2f(1.0f, -1.0f);
+        GL11.glTexCoord2f(1.0f + ox, 1.0f + oy); GL11.glVertex2f(1.0f, 1.0f);
+        GL11.glTexCoord2f(ox, 1.0f + oy); GL11.glVertex2f(-1.0f, 1.0f);
+        GL11.glEnd();
     }
 
     /** Ve fullscreen quad voi texture cua FBO, nhan mau (premultiplied) voi f. */

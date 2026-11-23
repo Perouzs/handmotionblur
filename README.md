@@ -2,10 +2,9 @@
 Build bang GitHub Actions (tab Actions -> Artifacts -> mod-jar).
 
 Lenh (/handblur hoac /hmb):
-- /handblur status
-- /handblur toggle                      bat/tat toan bo mod (phim V)
+- /handblur status | toggle
 - /handblur hand|world toggle
-- /handblur hand|world ms <5-300>       do dai vet blur (ms), khong phu thuoc FPS
-- /handblur hand|world frames <0-32>    tron N frame co dinh; 0 = dung ms
-- /handblur hand|world mode <mix|max>
-Config: config/handmotionblur.cfg (nhom [hand] va [world]).
+- /handblur hand|world ms <5-300> / frames <0-32> / mode <mix|max>   (world co them mode rotation)
+- /handblur world shutter <1-50>   do dai vet blur khi xoay camera (mode rotation)
+- /handblur world samples <2-48>   so mau toi da (mode rotation)
+Config: config/handmotionblur.cfg

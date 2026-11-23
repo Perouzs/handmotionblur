@@ -23,7 +23,7 @@ public class HandBlurCommand extends CommandBase {
 
     @Override
     public String getCommandUsage(ICommandSender sender) {
-        return "/handblur status | toggle | <hand|world> <toggle|ms <5-300>|frames <0-32>|mode <mix|max>>";
+        return "/handblur status | toggle | <hand|world> <toggle|ms|frames|mode|shutter|samples> [gia tri]";
     }
 
     @Override
@@ -83,12 +83,29 @@ public class HandBlurCommand extends CommandBase {
             s.setFrames(v);
             msg(sender, s.name + ".frames = " + s.frames + (s.frames == 0 ? "  (dung blurMs)" : "  (tron co dinh ~N frame)"));
         } else if (sub.equals("mode")) {
-            if (val == null || !(val.equalsIgnoreCase("mix") || val.equalsIgnoreCase("max"))) {
-                msg(sender, "Dung: /handblur " + s.name + " mode <mix|max>");
+            String m = null;
+            if (val != null) {
+                for (String cand : s.modes) {
+                    if (cand.equalsIgnoreCase(val)) m = cand;
+                }
+            }
+            if (m == null) {
+                msg(sender, "Dung: /handblur " + s.name + " mode <" + String.join("|", s.modes).toLowerCase() + ">");
                 return;
             }
-            s.setMode(val.toUpperCase());
+            s.setMode(m);
             msg(sender, s.name + ".mode = " + s.mode);
+        } else if (sub.equals("shutter") || sub.equals("samples")) {
+            if (!s.hasRotation) {
+                msg(sender, "Lenh nay chi dung cho 'world' (che do ROTATION).");
+                return;
+            }
+            boolean shut = sub.equals("shutter");
+            Integer v = parseInt(sender, val, shut ? 1 : 2, shut ? 50 : 48);
+            if (v == null) return;
+            if (shut) s.setShutterMs(v); else s.setSamples(v);
+            msg(sender, s.name + "." + (shut ? "shutterMs = " + s.shutterMs : "samples = " + s.samples)
+                    + (s.isRotation() ? "" : "  (chi co tac dung khi mode = rotation)"));
         } else {
             msg(sender, getCommandUsage(sender));
         }
@@ -115,8 +132,9 @@ public class HandBlurCommand extends CommandBase {
     }
 
     private void line(ICommandSender sender, BlurSettings s) {
+        String extra = s.hasRotation ? " | shutterMs=" + s.shutterMs + " | samples=" + s.samples : "";
         msg(sender, s.name + ": " + (s.enabled ? "ON" : "OFF") + " | mode=" + s.mode
-                + " | blurMs=" + s.blurMs + " | frames=" + s.frames);
+                + " | blurMs=" + s.blurMs + " | frames=" + s.frames + extra);
     }
 
     private void msg(ICommandSender sender, String text) {
@@ -129,10 +147,12 @@ public class HandBlurCommand extends CommandBase {
             return getListOfStringsMatchingLastWord(args, "status", "toggle", "hand", "world");
         }
         if (args.length == 2 && (args[0].equalsIgnoreCase("hand") || args[0].equalsIgnoreCase("world"))) {
-            return getListOfStringsMatchingLastWord(args, "toggle", "ms", "frames", "mode");
+            return getListOfStringsMatchingLastWord(args, "toggle", "ms", "frames", "mode", "shutter", "samples");
         }
         if (args.length == 3 && args[1].equalsIgnoreCase("mode")) {
-            return getListOfStringsMatchingLastWord(args, "mix", "max");
+            return args[0].equalsIgnoreCase("world")
+                    ? getListOfStringsMatchingLastWord(args, "rotation", "mix", "max")
+                    : getListOfStringsMatchingLastWord(args, "mix", "max");
         }
         return null;
     }

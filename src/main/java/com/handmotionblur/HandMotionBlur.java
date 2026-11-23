@@ -15,7 +15,7 @@ import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
 import net.minecraftforge.fml.common.gameevent.InputEvent;
 import org.lwjgl.input.Keyboard;
 
-@Mod(modid = HandMotionBlur.MODID, name = "Motion Blur (Hand + World)", version = "1.1.0",
+@Mod(modid = HandMotionBlur.MODID, name = "Motion Blur (Hand + World)", version = "1.2.0",
         acceptedMinecraftVersions = "[1.8.9]", clientSideOnly = true)
 public class HandMotionBlur {
     public static final String MODID = "handmotionblur";
@@ -25,9 +25,9 @@ public class HandMotionBlur {
     public static boolean always = false;
 
     /** Blur cho tay / vat pham cam. */
-    public static final BlurSettings hand = new BlurSettings("hand", true, 40);
+    public static final BlurSettings hand = new BlurSettings("hand", true, 40, "MIX", new String[]{"MIX", "MAX"}, false);
     /** Blur cho toan bo the gioi (camera, mob, nguoi choi khac...). */
-    public static final BlurSettings world = new BlurSettings("world", true, 25);
+    public static final BlurSettings world = new BlurSettings("world", true, 25, "ROTATION", new String[]{"ROTATION", "MIX", "MAX"}, true);
 
     private static Configuration config;
     private static Property pMaster, pAlways;
